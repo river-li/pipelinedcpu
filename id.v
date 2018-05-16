@@ -1,10 +1,11 @@
-module pipeir (pc4,ins,wir,clk,clrn,dpc4,inst);
+module pipeir (pc4,ins,wir,clk,clrn,dpc4,inst,if_flush);
 	input [31:0] pc4,ins;
 	input wir,clk,clrn;
+	input if_flush;
 	output [31:0] dpc4,inst;
 	reg [31:0] dpc4,inst;
 	always @(posedge clk or negedge clrn)begin
-	  if (clrn==0)begin
+	  if (clrn==0|if_flush)begin
 	    dpc4<=0;
 	    inst<=0;
 	    end
@@ -21,7 +22,7 @@ module pipeir (pc4,ins,wir,clk,clrn,dpc4,inst);
 module pipeid (mwreg,mrn,ern,ewreg,em2reg,mm2reg,dpc4,inst,wrn,
 		wdi,ealu,malu,mmo,wwreg,clk,clrn,bpc,jpc,pcsource,
 		nostall,wreg,m2reg,wmem,aluc,aluimm,a,b,imm,rn/*rn is the register that would be destination*/,
-		shift,jal);
+		shift,jal,if_flush);
 	input [31:0] dpc4,inst,wdi,ealu,malu,mmo;
 	input [4:0] ern,mrn,wrn;
 	input mwreg,ewreg,em2reg,mm2reg,wwreg;
@@ -31,6 +32,7 @@ module pipeid (mwreg,mrn,ern,ewreg,em2reg,mm2reg,dpc4,inst,wrn,
 	output [3:0] aluc;
 	output [1:0] pcsource;
 	output nostall,wreg,m2reg,wmem,aluimm,shift,jal;
+	output if_flush;
 	//nostall is wpcir,when it is 1, ir is writeable
 	
 	wire[5:0] op,func;
@@ -46,16 +48,18 @@ module pipeid (mwreg,mrn,ern,ewreg,em2reg,mm2reg,dpc4,inst,wrn,
 	assign	rd=inst[15:11];
 	assign	jpc={dpc4[31:28],inst[25:0],2'b00};
 
+	assign	rsrtequ=~|(a^b);	//rsrtequ=(a==b)
 	pipeidcu cu(mwreg,mrn,ern,ewreg,em2reg,mm2reg,rsrtequ,func,
 		op,rs,rt,wreg,m2reg,wmem,aluc,regrt,aluimm,
-		fwda,fwdb,nostall,sext,pcsource,shift,jal);
+		fwda,fwdb,nostall,sext,pcsource,shift,jal,
+		if_flush
+		);
 	RF rf(rs,rt,wdi,wrn,wwreg,~clk,qa,qb);
-//	regfile rf(rs,rt,wdi,wrn,wwreg,~clk,clrn,qa,qb);
 	mux2x5	des_reg_no	(rd,rt,regrt,rn);
 	mux4x32 alu_a (qa,ealu,malu,mmo,fwda,a);
 	mux4x32 alu_b (qb,ealu,malu,mmo,fwdb,b);
 
-	assign	rsrtequ=~|(a^b);	//rsrtequ=(a==b)
+
 	assign	e=sext & inst[15];
 	assign	ext16={16{e}};
 	assign	imm={ext16,inst[15:0]};
@@ -67,7 +71,7 @@ module pipeid (mwreg,mrn,ern,ewreg,em2reg,mm2reg,dpc4,inst,wrn,
 
 module pipeidcu (mwreg,mrn,ern,ewreg,em2reg,mm2reg,rsrtequ,func,op,rs,rt,
 	wreg,m2reg,wmem,aluc,regrt,aluimm,fwda,fwdb,nostall,sext,
-	pcsource,shift,jal);
+	pcsource,shift,jal,if_flush);
 	input	mwreg,ewreg,em2reg,mm2reg,rsrtequ;
 	input [4:0] mrn,ern,rs,rt;
 	input [5:0] func,op;
@@ -76,6 +80,7 @@ module pipeidcu (mwreg,mrn,ern,ewreg,em2reg,mm2reg,rsrtequ,func,op,rs,rt,
 	output [1:0] pcsource;
 	output [1:0] fwda,fwdb;
 	output nostall;
+	output if_flush;
 	
 	reg [1:0] fwda,fwdb;
 	wire r_type,i_add,i_sub,i_and,i_or,i_xor,i_sll,i_srl,i_sra,i_jr;
@@ -88,8 +93,8 @@ module pipeidcu (mwreg,mrn,ern,ewreg,em2reg,mm2reg,rsrtequ,func,op,rs,rt,
 	and(i_xor,r_type,func[5],~func[4],~func[3],func[2],func[1],~func[0]);
 	and(i_sll,r_type,~func[5],~func[4],~func[3],~func[2],~func[1],~func[0]);
 	and(i_srl,r_type,~func[5],~func[4],~func[3],~func[2],func[1],~func[0]);
-	and(i_sra,r_type,func[5],~func[4],~func[3],~func[2],func[1],func[0]);
-	and(i_jr,r_type,func[5],~func[4],func[3],~func[2],~func[1],~func[0]);
+	and(i_sra,r_type,~func[5],~func[4],~func[3],~func[2],func[1],func[0]);
+	and(i_jr,r_type,~func[5],~func[4],func[3],~func[2],~func[1],~func[0]);
 	
 	and(i_addi,~op[5],~op[4],op[3],~op[2],~op[1],~op[0]);
 	and(i_andi,~op[5],~op[4],op[3],op[2],~op[1],~op[0]);
@@ -107,7 +112,13 @@ module pipeidcu (mwreg,mrn,ern,ewreg,em2reg,mm2reg,rsrtequ,func,op,rs,rt,
 		i_ori| i_xori| i_lw| i_sw| i_beq | i_bne;
 	wire i_rt = i_add | i_sub | i_and | i_or | i_xor | i_sll |i_srl| i_sra |
 		i_sw| i_beq| i_bne;
-	assign nostall= ~(ewreg & em2reg & (ern!=0) &(i_rs &(ern==rs)|i_rt &(ern==rt)));
+	
+	wire beq_eq,bne_ne;
+	wire if_flush;
+	
+	assign nostall= ~(ewreg & em2reg & (ern!=0) &((i_rs &(ern==rs))|
+	(i_rt &(ern==rt)))
+	);
 
 	always @ (ewreg or mwreg or ern or mrn or em2reg or mm2reg or rs or rt) begin
 		fwda = 2'b00;
@@ -150,5 +161,10 @@ module pipeidcu (mwreg,mrn,ern,ewreg,em2reg,mm2reg,rsrtequ,func,op,rs,rt,
 	assign wmem = i_sw&nostall;
 	assign pcsource[1]=i_jr|i_j|i_jal;
 	assign pcsource[0]=i_beq&rsrtequ|i_bne&~rsrtequ|i_j|i_jal;
+	
+	assign beq_eq=i_beq&rsrtequ;
+	assign bne_ne=i_bne&(~rsrtequ);
+	assign if_flush=beq_eq|bne_ne|i_j|i_jal;
+	
 	endmodule
 

@@ -6,9 +6,9 @@ module shift (d,sa,right,arith,sh);
 	reg [31:0]	sh;
 	always @* begin
 		if(!right)begin
-			sh=d<<sh;
+			sh=(d<<sa);
 		end else if (!arith) begin
-			sh=d>>sa;
+			sh=(d>>sa);
 		end else begin
 			sh = $signed(d) >>>sa;
 		end
